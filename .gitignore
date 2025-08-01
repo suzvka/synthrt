@@ -47,3 +47,4 @@ CMakeSettings.json
 /vcpkg
 /data
 /*.natvis
+/third-party/Microsoft.AI.DirectML.1.15.4.zip
