@@ -9,16 +9,13 @@
 
 #include "Archive.h"
 
-
-
 namespace fs = std::filesystem;
 
-using CheckFunction = std::function<Archive::ErrorCode(const Archive &)>;
+using ContentCheck = std::function<bool(const std::vector<char> &)>;
+using UninstallCallBack = std::function<bool()>;
 
 static srt::LogCategory cliLog("unpacker");
-
-static void log_report_callback(int level, const srt::LogContext &ctx,
-								const std::string_view &msg) {
+static void log_report_callback(int level, const srt::LogContext &ctx, const std::string_view &msg) {
 	using namespace srt;
 	using namespace stdc;
 
@@ -95,66 +92,114 @@ static inline std::string exception_message(const std::exception &e) {
 	return msg;
 }
 
-// 检查压缩包目录结构
-// 注入检查规则
-// 传入参数为 CompactionPackage 的函数
-static Archive::ErrorCode check(
-	const Archive &packer, CheckFunction checkFunction) {
-	return checkFunction(packer);
+static bool testCheck(const std::vector<char> &fileData) {
+    return true;
 }
 
+//====================================================================================
+// Install the package to the specified location (must be a package that complies with the rules)
+//------------------------------------------------------------------------------
+// @param packerPath Package path
+// @param outputDir Output directory
+// @param checkFilePath Check file path for custom file check rules
+// @param checkFunction: Custom file check rule: the file content will be passed to this function,
+// and an empty data block will be returned if the target file is abnormal
+// 
+//------------------------------------------------------------------------------
 static int installPackage(
 	const fs::path &packerPath, 
 	const fs::path &outputDir,
-    CheckFunction checkFunction = [](const Archive &) { return Archive::ErrorCode::None; }) {
-	Archive package(packerPath.generic_string());
-    
-	// 检查压缩包
-    Archive::ErrorCode code = check(package, checkFunction);
-    if (code != Archive::ErrorCode::None) {
+	const fs::path &checkFilePath = "",
+    ContentCheck	checkFunction = [](const std::vector<char> &) { return true; }) {
+	Archive package(packerPath);
+
+    ArchiveRule check(package);
+    check.addRule(checkFilePath, checkFunction);
+	
+	if (!check.check()) {
         throw std::runtime_error(stdc::formatN(R"(Unrecognized package: "%1")", packerPath));
+	}
+
+	if (package.allExtractTo(outputDir) != Archive::ErrorCode::None) {
+        throw std::runtime_error("Failed to extract package to: " + outputDir.string());
     }
 
-	// 解压缩包
-	cliLog.srtInfo("Extracting package: " + stdc::path::to_utf8(packerPath));
-    package.allExtractTo(outputDir);
-	cliLog.srtSuccess("Package successfully installed at: " + stdc::path::to_utf8(outputDir));
+	package.extractTo("test.txt", outputDir);
 
 	return 0;
 }
 
-// 主函数 Main
-// ===============================
+//====================================================================================
+// Uninstall the specified installed package (must be a package that complies with the rules)
+//------------------------------------------------------------------------------
+// @param installedDir:	Installed directory
+// @param checkFilePath Check: file path for custom file check rules
+// @param checkFunction: Custom file check rule: the file content will be passed to this function, 
+// and an empty data block will be returned if the target file is abnormal
+// @param uninstallCallback: Callback triggered before uninstallation, return true to continue uninstallation
+// 
+//------------------------------------------------------------------------------
+static int uninstallPackage(
+    const fs::path &installedDir, 
+	const fs::path &checkFilePath		= "",
+	ContentCheck	checkFunction		= [](const std::vector<char> &) { return true; },
+	UninstallCallBack uninstallCallback = []() { return true; }
+    ) {
+    if (!uninstallCallback()) return -1; // 被取消也算正常流程
+
+    ArchiveRule check(installedDir);
+    check.addRule(checkFilePath, checkFunction);
+
+    if (!check.check()) {
+        throw std::runtime_error("Unrecognized installation at: " + installedDir.string() + "()"
+		);
+    }
+
+    std::error_code ec;
+    fs::remove_all(installedDir, ec);
+    if (ec) {
+        throw std::runtime_error("Failed to uninstall from: " + installedDir.string() + " - " + ec.message());
+    }
+
+    return 0;
+}
+
+//====================================================================================
+// Test method
+// 测试方法
+//------------------------------------------------------------------------------
+// Command line
+// 命令行
+// dsinfer-package.exe "C:\path\to\package.zip" "C:\path\to\output"
+//------------------------------------------------------------------------------
+// Keyboard input
+// 键盘输入
+// - packerPath
+// - outputDir
+//------------------------------------------------------------------------------
 int main(int /*argc*/, char * /*argv*/[]) {
-	// 解析命令行参数
-	//auto cmdline = stdc::system::command_line_arguments();
-	//if (cmdline.size() < 3) {
-	//	stdc::u8println("Usage: %1 <zip_package> <output_directory>",
-	//					stdc::system::application_name());
-	//	return 1;
-	//}
-	
-
-	// 设置日志回调
-	srt::Logger::setLogCallback(log_report_callback);
-
-	//const auto &zipPath = stdc::path::from_utf8(cmdline[1]);
-	//const auto &outputDir = stdc::path::from_utf8(cmdline[2]);
-
-	// 改成键盘输入压缩包路径和输出目录
-	stdc::u8println("Enter the path to the zip package:");
+	auto cmdline = stdc::system::command_line_arguments();
 	std::string zipPath;
-	std::getline(std::cin, zipPath);
-	stdc::u8println("Enter the output directory:");
 	std::string outputDir;
-	std::getline(std::cin, outputDir);
+
+	if (cmdline.size() < 3) {
+		stdc::u8println("Enter the path to the zip package:");
+		std::getline(std::cin, zipPath);
+		stdc::u8println("Enter the output directory:");
+		std::getline(std::cin, outputDir);
+	} 
+	else {
+		zipPath = cmdline[1];
+		outputDir = cmdline[2];
+	}
+
+	srt::Logger::setLogCallback(log_report_callback);
 
 	int ret;
 	try {
-		// 调用核心逻辑
-		ret = installPackage(zipPath, outputDir);
-	} catch (const std::exception &e) {
-		// 统一处理异常
+        ret = installPackage(fs::path(zipPath), fs::path(outputDir));
+	} 
+	catch (const std::exception &e) {
 		std::string msg = exception_message(e);
 		stdc::console::critical("Error: %1", msg);
 		ret = -1;
