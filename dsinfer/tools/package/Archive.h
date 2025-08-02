@@ -194,8 +194,8 @@ public:
 	ArchiveRule(Archive &archive);
 	ArchiveRule(const fs::path &path);
 
-	ArchiveRule &hasFile(const std::wstring &name);
-    ArchiveRule &hasDir(const std::wstring &name);
+	ArchiveRule &hasFile(const fs::path &name);
+    ArchiveRule &hasDir(const fs::path &name);
     ArchiveRule &addRule(const fs::path &path, ContentCheck rule);
 
 	bool check() const;
