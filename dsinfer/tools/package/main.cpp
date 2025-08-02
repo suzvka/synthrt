@@ -114,7 +114,9 @@ static int installPackage(
 	Archive package(packerPath);
 
     ArchiveRule check(package);
-    check.addRule(checkFilePath, checkFunction);
+    if (!checkFilePath.empty()) {
+        check.addRule(checkFilePath, checkFunction);
+    }
 	
 	if (!check.check()) {
         throw std::runtime_error(stdc::formatN(R"(Unrecognized package: "%1")", packerPath));
@@ -124,15 +126,13 @@ static int installPackage(
         throw std::runtime_error("Failed to extract package to: " + outputDir.string());
     }
 
-	package.extractTo("test.txt", outputDir);
-
 	return 0;
 }
 
 //====================================================================================
 // Uninstall the specified installed package (must be a package that complies with the rules)
 //------------------------------------------------------------------------------
-// @param installedDir:	Installed directory
+// @param installedDir: Installed directory
 // @param checkFilePath Check: file path for custom file check rules
 // @param checkFunction: Custom file check rule: the file content will be passed to this function, 
 // and an empty data block will be returned if the target file is abnormal
@@ -145,14 +145,15 @@ static int uninstallPackage(
 	ContentCheck	checkFunction		= [](const std::vector<char> &) { return true; },
 	UninstallCallBack uninstallCallback = []() { return true; }
     ) {
-    if (!uninstallCallback()) return -1; // 被取消也算正常流程
+    if (!uninstallCallback()) return -1;
 
     ArchiveRule check(installedDir);
-    check.addRule(checkFilePath, checkFunction);
+    if (!checkFilePath.empty()) {
+        check.addRule(checkFilePath, checkFunction);
+    }
 
     if (!check.check()) {
-        throw std::runtime_error("Unrecognized installation at: " + installedDir.string() + "()"
-		);
+        throw std::runtime_error("Unrecognized installation at: " + installedDir.string());
     }
 
     std::error_code ec;
@@ -166,14 +167,12 @@ static int uninstallPackage(
 
 //====================================================================================
 // Test method
-// 测试方法
+// Only all install
 //------------------------------------------------------------------------------
 // Command line
-// 命令行
 // dsinfer-package.exe "C:\path\to\package.zip" "C:\path\to\output"
 //------------------------------------------------------------------------------
 // Keyboard input
-// 键盘输入
 // - packerPath
 // - outputDir
 //------------------------------------------------------------------------------
@@ -197,7 +196,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
 	int ret;
 	try {
-        ret = installPackage(fs::path(zipPath), fs::path(outputDir));
+        ret = installPackage(zipPath, outputDir);
 	} 
 	catch (const std::exception &e) {
 		std::string msg = exception_message(e);
