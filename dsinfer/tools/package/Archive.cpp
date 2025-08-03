@@ -25,6 +25,18 @@ const std::unordered_map<Archive::ErrorCode, std::string> Archive::errorText = {
 	{Archive::ErrorCode::UnknownError,		"Unknown error occurred"					}
 };
 
+const std::unordered_map<Archive::ErrorCode, srt::Error::Type> Archive::errorCode = {
+	{Archive::ErrorCode::InvalidArchive,	srt::Error::InvalidFormat					},
+	{Archive::ErrorCode::PasswordRequired,	srt::Error::FeatureNotSupported				},
+	{Archive::ErrorCode::PasswordIncorrect,	srt::Error::InvalidArgument					},
+	{Archive::ErrorCode::FileNotFound,		srt::Error::FileNotFound					},
+	{Archive::ErrorCode::DirectoryNotFound,	srt::Error::FileNotFound					},
+	{Archive::ErrorCode::PackageNotFound,	srt::Error::FileNotFound					},
+	{Archive::ErrorCode::UnsupportedFormat,	srt::Error::FeatureNotSupported				},
+	{Archive::ErrorCode::ExtractionFailed,	srt::Error::SessionError					},
+	{Archive::ErrorCode::UnknownError,		srt::Error::SessionError					}
+};
+
 namespace fs = std::filesystem;
 
 Archive::Archive(const fs::path &path, const std::string &password) 
@@ -32,7 +44,7 @@ Archive::Archive(const fs::path &path, const std::string &password)
 }
 
 Archive::Archive(const std::vector<std::byte> &data, const std::string &password)
-    : Archive(data, [password](const std::string &) { return password; }) {
+	: Archive(data, [password](const std::string &) { return password; }) {
 }
 
 Archive::Archive(const std::filesystem::path &loadPath, const EnterPassword &enterPasswordCallback) {
@@ -43,13 +55,13 @@ Archive::Archive(const std::filesystem::path &loadPath, const EnterPassword &ent
 	_isEncrypted = _archive->hasEncryptedItems();
 
 	if (_isEncrypted) {
-        auto packageName = stdc::path::to_utf8(name());
-        auto password = enterPasswordCallback(packageName);
+		auto packageName = stdc::path::to_utf8(name());
+		auto password = enterPasswordCallback(packageName);
 		if (!setPassword(password))		return;
 	}
 
 	_extractedSize = _archive->size();
-    _isValid = true;
+	_isValid = true;
 }
 
 Archive::Archive(const std::vector<std::byte> &data, const EnterPassword &enterPasswordCallback) {
@@ -57,9 +69,9 @@ Archive::Archive(const std::vector<std::byte> &data, const EnterPassword &enterP
 	_isEncrypted = _archive->hasEncryptedItems();
 
 	if (_isEncrypted) {
-        auto packageName = stdc::path::to_utf8(name());
-        auto password = enterPasswordCallback(packageName);
-        if (!setPassword(password))		return;
+		auto packageName = stdc::path::to_utf8(name());
+		auto password = enterPasswordCallback(packageName);
+		if (!setPassword(password))		return;
 	}
 
 	_extractedSize = _archive->size();
@@ -82,8 +94,8 @@ Archive::ExpectedVoid Archive::setPassword(const std::string &password) {
 }
 
 const Archive::PreviewView& Archive::previewDir(const fs::path &path) const {
-    if (_lastPreview.first == path) { return _lastPreview.second;
-    }
+	if (_lastPreview.first == path) { return _lastPreview.second;
+	}
 
 	const auto items = _archive->items();
 	PreviewView directory;
@@ -99,8 +111,8 @@ const Archive::PreviewView& Archive::previewDir(const fs::path &path) const {
 	}
 
 	_lastPreview.first = path;
-    _lastPreview.second = directory;
-    return _lastPreview.second;
+	_lastPreview.second = directory;
+	return _lastPreview.second;
 }
 
 Archive::ExpectedVoid Archive::allExtractTo(const fs::path &outputPath) const {
@@ -168,14 +180,14 @@ Archive::ExpectedData Archive::getFile(const fs::path &path, const FileName &nam
 
 		auto &entry = item.find(name)->second;
 
-        std::vector<std::byte> data(entry._size);
+		std::vector<std::byte> data(entry._size);
 
-        MemoryBuffer buffer(data);
-        std::ostream out_stream(&buffer);
+		MemoryBuffer buffer(data);
+		std::ostream out_stream(&buffer);
 
-        _archive->extractTo(out_stream, entry._index);
+		_archive->extractTo(out_stream, entry._index);
 
-        return data;
+		return data;
 	} 
 	catch (const bit7z::BitException &e){ return ErrorCode::ExtractionFailed;} 
 	catch (const std::exception &e)		{ return {};} 
@@ -263,16 +275,16 @@ std::vector<std::byte> ArchiveRule::getData(const fs::path &fullPath) const {
 
 Archive::ExpectedVoid ArchiveRule::check() const {
 	if (_archive) {
-        if (!checkArchive())
-            return Archive::ErrorCode::FileNotFound;
+		if (!checkArchive())
+			return Archive::ErrorCode::FileNotFound;
 	} 
 	else {
-        if (!checkFileSystem())
-            return Archive::ErrorCode::FileNotFound;
+		if (!checkFileSystem())
+			return Archive::ErrorCode::FileNotFound;
 	}
-    if (!checkRules())
-        return Archive::ErrorCode::InvalidArchive;
-    return {};
+	if (!checkRules())
+		return Archive::ErrorCode::InvalidArchive;
+	return {};
 }
 
 bool ArchiveRule::checkArchive() const {
@@ -338,11 +350,11 @@ std::string Archive::composeMessage(ErrorCode errorCode, const std::string &mess
 }
 
 Archive::ExpectedVoid::ExpectedVoid(ErrorCode errorCode, const std::string &message)
-	: srt::Expected<void>(srt::Error(-1, composeMessage(errorCode, message))) {
+    : srt::Expected<void>(srt::Error(Archive::errorCode.at(errorCode), composeMessage(errorCode, message))) {
 }
 
 Archive::ExpectedData::ExpectedData(ErrorCode errorCode, const std::string &message)
-	: srt::Expected<std::vector<std::byte>>(srt::Error(-1, composeMessage(errorCode, message))) {
+	: srt::Expected<std::vector<std::byte>>(srt::Error(Archive::errorCode.at(errorCode), composeMessage(errorCode, message))) {
 }
 
 Archive::ExpectedData::ExpectedData(const std::vector<std::byte> &data)
@@ -350,31 +362,31 @@ Archive::ExpectedData::ExpectedData(const std::vector<std::byte> &data)
 }
 
 Archive::MemoryBuffer::MemoryBuffer(std::vector<std::byte> &target_vector)
-    : m_write_vec(&target_vector) {
+	: m_write_vec(&target_vector) {
 }
 
 Archive::MemoryBuffer::MemoryBuffer(const std::byte *data, size_t size) : m_write_vec(nullptr) {
-    char *begin = const_cast<char *>(reinterpret_cast<const char *>(data));
-    char *end = begin + size;
-    this->setg(begin, begin, end);
+	char *begin = const_cast<char *>(reinterpret_cast<const char *>(data));
+	char *end = begin + size;
+	this->setg(begin, begin, end);
 }
 
 std::streamsize Archive::MemoryBuffer::xsputn(const char *s, std::streamsize n) {
-    if (m_write_vec) {
-        const auto *byte_s = reinterpret_cast<const std::byte *>(s);
-        m_write_vec->insert(m_write_vec->end(), byte_s, byte_s + n);
-        return n;
-    }
-    return std::streambuf::xsputn(s, n);
+	if (m_write_vec) {
+		const auto *byte_s = reinterpret_cast<const std::byte *>(s);
+		m_write_vec->insert(m_write_vec->end(), byte_s, byte_s + n);
+		return n;
+	}
+	return std::streambuf::xsputn(s, n);
 }
 
 Archive::MemoryBuffer::int_type Archive::MemoryBuffer::overflow(int_type ch) {
-    if (m_write_vec) {
-        if (ch != traits_type::eof()) {
-            m_write_vec->push_back(static_cast<std::byte>(ch));
-            return ch;
-        }
-        return traits_type::eof();
-    }
-    return std::streambuf::overflow(ch);
+	if (m_write_vec) {
+		if (ch != traits_type::eof()) {
+			m_write_vec->push_back(static_cast<std::byte>(ch));
+			return ch;
+		}
+		return traits_type::eof();
+	}
+	return std::streambuf::overflow(ch);
 }

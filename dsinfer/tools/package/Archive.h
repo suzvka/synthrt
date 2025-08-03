@@ -162,8 +162,7 @@ private:
 
 	static const bit7z::Bit7zLibrary lib;
     static const std::unordered_map<ErrorCode, std::string> errorText;
-
-	
+    static const std::unordered_map<ErrorCode, srt::Error::Type> errorCode;
 };
 
 class ArchiveRule {
