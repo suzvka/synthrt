@@ -1,67 +1,96 @@
 ﻿#include "Archive.h"
 
+#include <bit7z/bitfilecompressor.hpp>
+#include <bit7z/bitfileextractor.hpp>
+#include <bit7z/bitmemcompressor.hpp>
+#include <bit7z/bitmemextractor.hpp>
+
 #include <stdcorelib/system.h>
 #include <stdcorelib/console.h>
 #include <stdcorelib/path.h>
-#include <synthrt/Support/Logging.h>
 
-bit7z::Bit7zLibrary Archive::lib{"7zip.dll"};
-static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
-static std::wstring strToWstr(const std::string &str) {
-	return conv.from_bytes(str);
+#define STRINGIFY_DETAIL(x) #x
+#define STRINGIFY(x)        STRINGIFY_DETAIL(x)
+const bit7z::Bit7zLibrary Archive::lib{STRINGIFY(BIT7Z_SHARED_LIB_NAME)};
+
+const std::unordered_map<Archive::ErrorCode, std::string> Archive::errorText = {
+	{Archive::ErrorCode::InvalidArchive,	"Invalid archive format"					},
+	{Archive::ErrorCode::PasswordRequired,	"Password required for encrypted archive"	},
+	{Archive::ErrorCode::PasswordIncorrect, "Incorrect password for encrypted archive"	},
+	{Archive::ErrorCode::FileNotFound,		"File not found in archive"					},
+	{Archive::ErrorCode::DirectoryNotFound, "Directory not found in archive"			},
+	{Archive::ErrorCode::PackageNotFound,   "Package not found"							},
+	{Archive::ErrorCode::UnsupportedFormat, "Unsupported archive format"				},
+	{Archive::ErrorCode::ExtractionFailed,	"Failed to extract file from archive"		},
+	{Archive::ErrorCode::UnknownError,		"Unknown error occurred"					}
+};
+
+namespace fs = std::filesystem;
+
+Archive::Archive(const fs::path &path, const std::string &password) 
+	: Archive(path, [password](const std::string &) { return password; }) {
 }
-static std::string wstrTostr(const std::wstring &wstr) {
-	return std::string(wstr.cbegin(), wstr.cend());
+
+Archive::Archive(const std::vector<std::byte> &data, const std::string &password)
+    : Archive(data, [password](const std::string &) { return password; }) {
 }
 
-Archive::Archive(const fs::path &path, const std::string &password) {
-	if (!load(path)){				throw Error(
-										stdc::formatN(R"(Failed to extract archive from path: )" + path.generic_u8string()),
-										ErrorCode::InvalidArchive
-									);
-	}
-	if (_archive->hasEncryptedItems() && password.empty()) {
-									throw Error(stdc::formatN(R"(Archive requires a password)"), ErrorCode::PasswordRequired);
+Archive::Archive(const std::filesystem::path &loadPath, const EnterPassword &enterPasswordCallback) {
+	if (!load(loadPath))				return;
+	_packagePath = loadPath;
+	_packageName = loadPath.filename();
+	_size = fs::file_size(loadPath);
+	_isEncrypted = _archive->hasEncryptedItems();
+
+	if (_isEncrypted) {
+        auto packageName = stdc::path::to_utf8(name());
+        auto password = enterPasswordCallback(packageName);
+		if (!setPassword(password))		return;
 	}
 
-	if (!setPassword(password)){	throw Error(stdc::formatN(R"(Password incorrect)"), ErrorCode::PasswordIncorrect);
-	}
-
-	_packagePath = path;
-	_packageName = fs::path(path).filename();
-	_size = fs::file_size(path);
 	_extractedSize = _archive->size();
+    _isValid = true;
 }
 
-Archive::Archive(const std::vector<char> &data, const std::string &password) {
-	if (!load(convert_vector(data)))	throw Error(stdc::formatN(R"(Failed to extract archive)"));
-	if (!setPassword(password))			throw Error(stdc::formatN(R"(Password incorrect)"));
+Archive::Archive(const std::vector<std::byte> &data, const EnterPassword &enterPasswordCallback) {
+	if (!load(data))					return;
+	_isEncrypted = _archive->hasEncryptedItems();
+
+	if (_isEncrypted) {
+        auto packageName = stdc::path::to_utf8(name());
+        auto password = enterPasswordCallback(packageName);
+        if (!setPassword(password))		return;
+	}
+
+	_extractedSize = _archive->size();
+
+	_isValid = true;
 }
 
-Archive::Archive(const std::vector<unsigned char> &data, const std::string &password) {
-	if (!load(data))					throw Error(stdc::formatN(R"(Failed to extract archive)"));
-	if (!setPassword(password))			throw Error(stdc::formatN(R"(Password incorrect)"));
-}
-
-bool Archive::setPassword(const std::string &password) {
-	if (!_archive || !_archive->hasEncryptedItems())	return true;
-	if (!_password.empty() && _password == password)	return true;
+Archive::ExpectedVoid Archive::setPassword(const std::string &password) {
+	if (!_archive || !_archive->hasEncryptedItems())	return {};
+	if (!_password.empty() && _password == password)	return {};
 
 	try {
 		_archive->setPassword(password);
 		_password = password;
-		return true;
+		return {};
 	} 
-	catch (...)											{ return false; }
+	catch (...) {
+		return ExpectedVoid(ErrorCode::PasswordIncorrect);
+	}
 }
 
-Archive::PreviewView Archive::previewDir(const fs::path &path) const {
+const Archive::PreviewView& Archive::previewDir(const fs::path &path) const {
+    if (_lastPreview.first == path) { return _lastPreview.second;
+    }
+
 	const auto items = _archive->items();
 	PreviewView directory;
 	for (const auto &item : items) {
 		if (item.path().find(path.generic_u8string()) != 0) continue;
 		ArchiveEntry entry;
-		entry._basePath = strToWstr(item.path());
+		entry._basePath = stdc::path::from_utf8(item.path());
 		entry._isDir = item.isDir();
 		entry._size = item.size();
 		entry._index = item.index();
@@ -69,29 +98,27 @@ Archive::PreviewView Archive::previewDir(const fs::path &path) const {
 		directory[name] = entry;
 	}
 
-	return directory;
+	_lastPreview.first = path;
+    _lastPreview.second = directory;
+    return _lastPreview.second;
 }
 
-Archive::ErrorCode Archive::allExtractTo(const fs::path &outputPath) const {
+Archive::ExpectedVoid Archive::allExtractTo(const fs::path &outputPath) const {
 	try {
 		auto fullOutputPath = outputPath / fs::path(_packageName).stem();
 
 		_archive->extract(fullOutputPath.generic_u8string());
+		return {};
 	} 
 	catch (const bit7z::BitException&)  { return ErrorCode::ExtractionFailed; } 
 	catch (...)                         { return ErrorCode::UnknownError; }
-	return ErrorCode::None;
 }
 
-Archive::ErrorCode Archive::extractTo(const fs::path &path, const std::wstring &name, const fs::path &outputPath) const {
-	if (!hasFile(path, name)) {
-		return ErrorCode::FileNotFound;
-	}
+Archive::ExpectedVoid Archive::extractTo(const fs::path &path, const FileName &name, const fs::path &outputPath) const {
+	if (!hasFile(path, name))			{ return ErrorCode::FileNotFound; }
 	try {
 		auto item = previewDir(path);
-		if (item.empty()) {
-			return ErrorCode::FileNotFound;
-		}
+		if (item.empty())				{ return ErrorCode::FileNotFound; }
 		auto &entry = item.find(name)->second;
 
 		if (!fs::exists(outputPath.parent_path())) {
@@ -100,14 +127,13 @@ Archive::ErrorCode Archive::extractTo(const fs::path &path, const std::wstring &
 
 		_archive->extract(outputPath.generic_u8string(), std::vector<uint32_t>{entry._index});
 
-		return ErrorCode::None;
+		return {};
 	} 
 	catch (const bit7z::BitException)	{ return ErrorCode::ExtractionFailed; } 
 	catch (...)							{ return ErrorCode::UnknownError;}
-	return ErrorCode();
 }
 
-Archive::ErrorCode Archive::extractTo(const fs::path &fullPath, const fs::path &outputPath) const {
+Archive::ExpectedVoid Archive::extractTo(const fs::path &fullPath, const fs::path &outputPath) const {
 	auto parentPath = fullPath.has_parent_path() ? fullPath.parent_path() : "";
 	auto name = fullPath.filename();
 	if (!hasFile(parentPath, name))     return ErrorCode::FileNotFound;
@@ -115,36 +141,48 @@ Archive::ErrorCode Archive::extractTo(const fs::path &fullPath, const fs::path &
 	return extractTo(parentPath.generic_string(), name, outputPath);
 }
 
-bool Archive::hasFile(const fs::path &path, const std::wstring &name) const {
+Archive::ExpectedVoid Archive::hasFile(const fs::path &path, const FileName &name) const {
 	auto items = previewDir(path);
-	return items.find(name) != items.end() && !items.at(name)._isDir;
+	if (items.empty()) {
+		return ErrorCode::DirectoryNotFound;
+	} 
+	else if (items.find(name) != items.end() && !items.at(name)._isDir) {
+		return {};
+	}
+	else {
+		return ErrorCode::FileNotFound;
+	}
 }
 
-bool Archive::hasFile(const fs::path &fullPath) const {
+Archive::ExpectedVoid Archive::hasFile(const fs::path &fullPath) const {
 	auto parentPath = fullPath.has_parent_path() ? fullPath.parent_path() : "";
 	auto name = fullPath.filename();
 	return hasFile(parentPath, name);
 }
 
-std::vector<char> Archive::getFile(const fs::path &path, const std::wstring &name) const {
+Archive::ExpectedData Archive::getFile(const fs::path &path, const FileName &name) const {
 	try {
 		auto item = previewDir(path);
-		if (item.empty())				{ throw Error(stdc::formatN(R"(No such file in archive: )" + path.generic_u8string()), ErrorCode::DirectoryNotFound); }
-		if (!hasFile(path, name))		{ throw Error(stdc::formatN(R"(File not found in archive: )" + wstrTostr(name)), ErrorCode::FileNotFound); }
+		if (item.empty())				{ return ErrorCode::DirectoryNotFound; }
+		if (!hasFile(path, name))		{ return ErrorCode::FileNotFound; }
 
 		auto &entry = item.find(name)->second;
-		std::vector<unsigned char> data;
-		_archive->extract(data, entry._index);
 
-		return convert_vector(data);
-		
+        std::vector<std::byte> data(entry._size);
+
+        MemoryBuffer buffer(data);
+        std::ostream out_stream(&buffer);
+
+        _archive->extractTo(out_stream, entry._index);
+
+        return data;
 	} 
-	catch (const bit7z::BitException &e){ throw Error(stdc::formatN(R"(Failed to extract file: )" + wstrTostr(name) + R"(, error: )" + e.what()), ErrorCode::ExtractionFailed);} 
-	catch (const std::exception &e)		{ throw Error(stdc::formatN(R"(Failed to extract file: )" + wstrTostr(name) + R"(, error: )" + e.what()));} 
-	catch (...)							{ throw Error(stdc::formatN(R"(Failed to extract file: )" + wstrTostr(name) + R"(, unknown error)"));}
+	catch (const bit7z::BitException &e){ return ErrorCode::ExtractionFailed;} 
+	catch (const std::exception &e)		{ return {};} 
+	catch (...)							{ return {};}
 }
 
-std::vector<char> Archive::getFile(const fs::path &fullPath) const {
+Archive::ExpectedData Archive::getFile(const fs::path &fullPath) const {
 	auto parentPath = fullPath.has_parent_path() ? fullPath.parent_path() : "";
 	auto name = fullPath.filename();
 	return getFile(parentPath, name);
@@ -153,7 +191,8 @@ std::vector<char> Archive::getFile(const fs::path &fullPath) const {
 bool Archive::load(const fs::path &path) {
 	try {
 		_archive = std::make_unique<bit7z::BitArchiveReader>(
-			lib, path.generic_u8string(),
+			lib, 
+			path.generic_u8string(),
 			bit7z::BitFormat::Auto
 		);
 		return true;
@@ -163,25 +202,21 @@ bool Archive::load(const fs::path &path) {
 	}
 }
 
-bool Archive::load(const std::vector<unsigned char> &data) {
+bool Archive::load(const std::vector<std::byte> &data) {
+	if (data.empty()) return false;
+
 	try {
+		MemoryBuffer buffer(data.data(), data.size());
+		std::istream inArchive(&buffer);
+
 		_archive = std::make_unique<bit7z::BitArchiveReader>(
-			lib, data, 
-			bit7z::BitFormat::Auto
-		);
+			lib,
+			inArchive,
+			bit7z::BitFormat::Auto);
 		return true;
-	} 
-	catch (...) {
+	} catch (...) {
 		return false;
 	}
-}
-
-std::vector<unsigned char> Archive::convert_vector(const std::vector<char> &input) {
-	return std::vector<unsigned char>(input.begin(), input.end());
-}
-
-std::vector<char> Archive::convert_vector(const std::vector<unsigned char> &input) {
-	return std::vector<char>(input.begin(), input.end());
 }
 
 ArchiveRule::ArchiveRule(Archive &archive) {
@@ -200,40 +235,44 @@ ArchiveRule &ArchiveRule::hasFile(const fs::path &name) {
 }
 
 ArchiveRule &ArchiveRule::hasDir(const fs::path &name) {
-    _fileChecks.push_back(name / "");
+	_fileChecks.push_back(name / "");
 	return *this;
 }
 
-ArchiveRule &ArchiveRule::addRule(const fs::path &path, ContentCheck rule) {
+ArchiveRule &ArchiveRule::addRule(const fs::path &path, const Archive::ContentCheck& rule) {
 	_contentRules.push_back(std::pair(path, rule));
 	return *this;
 }
 
-std::vector<char> ArchiveRule::getData(const fs::path &path, const std::wstring &name) const {
+std::vector<std::byte> ArchiveRule::getData(const fs::path &path, const std::wstring &name) const {
 	try {
 		if (_archive)	return getArchiveData(path, name);
 		else			return getFileData(path, name);
 	} 
 	catch (...) {
-		return std::vector<char>();
+		return std::vector<std::byte>();
 	}
 }
 
-std::vector<char> ArchiveRule::getData(const fs::path &fullPath) const {
+std::vector<std::byte> ArchiveRule::getData(const fs::path &fullPath) const {
 	auto parentPath = fullPath.has_parent_path() ? fullPath.parent_path() : "";
 	auto fileName = fullPath.filename();
 
 	return getData(parentPath, fileName);
 }
 
-bool ArchiveRule::check() const {
+Archive::ExpectedVoid ArchiveRule::check() const {
 	if (_archive) {
-		if (!checkArchive())    return false;
+        if (!checkArchive())
+            return Archive::ErrorCode::FileNotFound;
 	} 
 	else {
-		if (!checkFileSystem())	return false;
+        if (!checkFileSystem())
+            return Archive::ErrorCode::FileNotFound;
 	}
-	return checkRules();
+    if (!checkRules())
+        return Archive::ErrorCode::InvalidArchive;
+    return {};
 }
 
 bool ArchiveRule::checkArchive() const {
@@ -257,29 +296,85 @@ bool ArchiveRule::checkRules() const {
 	for (const auto &rule : _contentRules) {
 		const auto &path = rule.first;
 		const auto &check = rule.second;
-		std::vector<char> data = getData(path);
+		std::vector<std::byte> data = getData(path);
 
 		if (!check(data))		return false;
 	}
 	return true;
 }
 
-std::vector<char> ArchiveRule::getArchiveData(const fs::path &path, const std::wstring &name) const{
-	return _archive->getFile(path, name);
+std::vector<std::byte> ArchiveRule::getArchiveData(const fs::path &path, const std::wstring &name) const{
+	return _archive->getFile(path, name).get();
 }
 
-std::vector<char> ArchiveRule::getFileData(const fs::path &path, const std::wstring &name) const {
+std::vector<std::byte> ArchiveRule::getFileData(const fs::path &path, const std::wstring &name) const {
 	auto fullpath = _basePath / path / name;
 	std::ifstream file(fullpath, std::ios::binary | std::ios::ate);
-	if (!file)								return {};
+	if (!file)					return {};
 
 	auto size = file.tellg();
-	if (size == -1)							return {};
+	if (size == -1)				return {};
 
-	std::vector<char> buffer(static_cast<size_t>(size));
+	std::vector<std::byte> buffer(static_cast<size_t>(size));
 
 	file.seekg(0);
-	if (!file.read(buffer.data(), size))	return {};
+
+	if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) 
+		return {};
 
 	return buffer;
+}
+
+std::string Archive::composeMessage(ErrorCode errorCode, const std::string &message) {
+	auto it = errorText.find(errorCode);
+	it != errorText.end() ? it : it = errorText.find(Archive::ErrorCode::UnknownError);
+
+	const std::string &baseMsg = it->second;
+	if (!message.empty()) {
+		return baseMsg + ": " + message;
+	}
+
+	return baseMsg;
+}
+
+Archive::ExpectedVoid::ExpectedVoid(ErrorCode errorCode, const std::string &message)
+	: srt::Expected<void>(srt::Error(-1, composeMessage(errorCode, message))) {
+}
+
+Archive::ExpectedData::ExpectedData(ErrorCode errorCode, const std::string &message)
+	: srt::Expected<std::vector<std::byte>>(srt::Error(-1, composeMessage(errorCode, message))) {
+}
+
+Archive::ExpectedData::ExpectedData(const std::vector<std::byte> &data)
+	: srt::Expected<std::vector<std::byte>>(data) {
+}
+
+Archive::MemoryBuffer::MemoryBuffer(std::vector<std::byte> &target_vector)
+    : m_write_vec(&target_vector) {
+}
+
+Archive::MemoryBuffer::MemoryBuffer(const std::byte *data, size_t size) : m_write_vec(nullptr) {
+    char *begin = const_cast<char *>(reinterpret_cast<const char *>(data));
+    char *end = begin + size;
+    this->setg(begin, begin, end);
+}
+
+std::streamsize Archive::MemoryBuffer::xsputn(const char *s, std::streamsize n) {
+    if (m_write_vec) {
+        const auto *byte_s = reinterpret_cast<const std::byte *>(s);
+        m_write_vec->insert(m_write_vec->end(), byte_s, byte_s + n);
+        return n;
+    }
+    return std::streambuf::xsputn(s, n);
+}
+
+Archive::MemoryBuffer::int_type Archive::MemoryBuffer::overflow(int_type ch) {
+    if (m_write_vec) {
+        if (ch != traits_type::eof()) {
+            m_write_vec->push_back(static_cast<std::byte>(ch));
+            return ch;
+        }
+        return traits_type::eof();
+    }
+    return std::streambuf::overflow(ch);
 }

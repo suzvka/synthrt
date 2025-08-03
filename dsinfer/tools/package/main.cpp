@@ -11,8 +11,8 @@
 
 namespace fs = std::filesystem;
 
-using ContentCheck = std::function<bool(const std::vector<char> &)>;
-using UninstallCallBack = std::function<bool()>;
+using ContentCheck = std::function<bool(const std::vector<std::byte> &)>;
+using UninstallCallBack = std::function<bool(const std::wstring &)>;
 
 static srt::LogCategory cliLog("unpacker");
 static void log_report_callback(int level, const srt::LogContext &ctx, const std::string_view &msg) {
@@ -107,26 +107,33 @@ static bool testCheck(const std::vector<char> &fileData) {
 // 
 //------------------------------------------------------------------------------
 static int installPackage(
-	const fs::path &packerPath, 
-	const fs::path &outputDir,
-	const fs::path &checkFilePath = "",
-    ContentCheck	checkFunction = [](const std::vector<char> &) { return true; }) {
-	Archive package(packerPath);
+    const fs::path &packerPath,
+    const fs::path &outputDir,
+    const fs::path &checkFilePath = "",
+    ContentCheck checkFunction = [](const std::vector<std::byte> &) { return true; })
+{
+    Archive package(packerPath);
+
+    if (!package.isValid()) {
+        throw std::runtime_error("Failed to load or invalid package: " + packerPath.string());
+    }
 
     ArchiveRule check(package);
     if (!checkFilePath.empty()) {
         check.addRule(checkFilePath, checkFunction);
     }
-	
-	if (!check.check()) {
-        throw std::runtime_error(stdc::formatN(R"(Unrecognized package: "%1")", packerPath));
-	}
 
-	if (package.allExtractTo(outputDir) != Archive::ErrorCode::None) {
-        throw std::runtime_error("Failed to extract package to: " + outputDir.string());
+    auto checkResult = check.check();
+    if (!checkResult) {
+        throw std::runtime_error("Package validation failed for '" + packerPath.string() + "': " + checkResult.error().message());
     }
 
-	return 0;
+    auto extractResult = package.allExtractTo(outputDir);
+    if (!extractResult) {
+        throw std::runtime_error("Failed to extract package to '" + outputDir.string() + "': " + extractResult.error().message());
+    }
+
+    return 0;
 }
 
 //====================================================================================
@@ -140,26 +147,27 @@ static int installPackage(
 // 
 //------------------------------------------------------------------------------
 static int uninstallPackage(
-    const fs::path &installedDir, 
-	const fs::path &checkFilePath		= "",
-	ContentCheck	checkFunction		= [](const std::vector<char> &) { return true; },
-	UninstallCallBack uninstallCallback = []() { return true; }
-    ) {
-    if (!uninstallCallback()) return -1;
-
+    const fs::path &installedDir,
+    const fs::path &checkFilePath = "",
+    ContentCheck checkFunction = [](const std::vector<std::byte> &) { return true; },
+    UninstallCallBack uninstallCallback = [](const std::wstring &) { return true; })
+{
+    if (!uninstallCallback(installedDir.stem().filename())) return -1;
     ArchiveRule check(installedDir);
+    
     if (!checkFilePath.empty()) {
         check.addRule(checkFilePath, checkFunction);
     }
 
-    if (!check.check()) {
-        throw std::runtime_error("Unrecognized installation at: " + installedDir.string());
+    auto checkResult = check.check();
+    if (!checkResult) {
+        throw std::runtime_error("Uninstallation check failed for directory '" + installedDir.string() + "': " + checkResult.error().message());
     }
 
     std::error_code ec;
     fs::remove_all(installedDir, ec);
     if (ec) {
-        throw std::runtime_error("Failed to uninstall from: " + installedDir.string() + " - " + ec.message());
+        throw std::runtime_error("Failed to remove directory '" + installedDir.string() + "': " + ec.message());
     }
 
     return 0;
