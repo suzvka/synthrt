@@ -16,180 +16,174 @@
 
 class Archive {
 public:
-	struct ArchiveEntry;
+    struct ArchiveEntry;
     enum class ErrorCode;
-	class ExpectedVoid;
+    class ExpectedVoid;
     class ExpectedData;
     class MemoryBuffer;
 
-	using FileName		= std::wstring;
-	using Reader		= std::unique_ptr<bit7z::BitArchiveReader>;
+    using FileName = std::wstring;
+    using Reader = std::unique_ptr<bit7z::BitArchiveReader>;
     using EnterPassword = std::function<std::string(const std::string &)>;
-	using ContentCheck	= std::function<bool(const std::vector<std::byte> &)>;
-	using ContentRule	= std::pair<std::filesystem::path, ContentCheck>;
-	using PreviewView	= std::unordered_map<FileName, ArchiveEntry>;
-	using LastPreview	= std::pair<std::filesystem::path, PreviewView>;
-	
-	Archive(const std::filesystem::path &loadPath	, const std::string &password = {});
-	Archive(const std::vector<std::byte> &data		, const std::string &password = {});
-    Archive(const std::filesystem::path &loadPath	, const EnterPassword &enterPasswordCallback);
-    Archive(const std::vector<std::byte> &data		, const EnterPassword &enterPasswordCallback);
+    using ContentCheck = std::function<bool(const std::vector<std::byte> &)>;
+    using ContentRule = std::pair<std::filesystem::path, ContentCheck>;
+    using PreviewView = std::unordered_map<FileName, ArchiveEntry>;
+    using LastPreview = std::pair<std::filesystem::path, PreviewView>;
 
-	std::filesystem::path path() const { return _packagePath; }
-	std::wstring name() const { return _packageName; }
-	size_t size() const { return _size;}
-	size_t extractedSize() const { return _extractedSize; }
-	bool isEncrypted() const { return _isEncrypted; }
-	bool isValid() const { return _isValid; }
+    Archive(const std::filesystem::path &loadPath, const std::string &password = {});
+    Archive(const std::vector<std::byte> &data, const std::string &password = {});
+    Archive(const std::filesystem::path &loadPath, const EnterPassword &enterPasswordCallback);
+    Archive(const std::vector<std::byte> &data, const EnterPassword &enterPasswordCallback);
 
-	//====================================================================================
-	// Enter password
-    //------------------------------------------------------------------------------
-	// @param password
-	//
-    //------------------------------------------------------------------------------
-    ExpectedVoid setPassword(
-		const std::string &password
-	);
+    std::filesystem::path path() const {
+        return _packagePath;
+    }
+    std::wstring name() const {
+        return _packageName;
+    }
+    size_t size() const {
+        return _size;
+    }
+    size_t extractedSize() const {
+        return _extractedSize;
+    }
+    bool isEncrypted() const {
+        return _isEncrypted;
+    }
+    bool isValid() const {
+        return _isValid;
+    }
 
-	//====================================================================================
-	// Preview the directory structure of the specified path layer
+    //====================================================================================
+    // Enter password
     //------------------------------------------------------------------------------
-	// @param path
-	//
+    // @param password
+    //
     //------------------------------------------------------------------------------
-    const PreviewView& previewDir(
-		const std::filesystem::path &path
-	) const;
+    ExpectedVoid setPassword(const std::string &password);
 
-	//====================================================================================
-	// Extract all to the specified path
+    //====================================================================================
+    // Preview the directory structure of the specified path layer
     //------------------------------------------------------------------------------
-	// @param outputPath
-	//
+    // @param path
+    //
     //------------------------------------------------------------------------------
-    ExpectedVoid allExtractTo(
-		const std::filesystem::path& outputPath
-	) const;
+    const PreviewView &previewDir(const std::filesystem::path &path) const;
 
-	//====================================================================================
-	// Extract individual files to the specified path
+    //====================================================================================
+    // Extract all to the specified path
     //------------------------------------------------------------------------------
-	// @param path
-	// @param name
-	// @param outputPath
-	//
+    // @param outputPath
+    //
     //------------------------------------------------------------------------------
-    ExpectedVoid extractTo(
-		const std::filesystem::path& path, 
-		const FileName &name, 
-		const std::filesystem::path& outputPath
-	) const;
+    ExpectedVoid allExtractTo(const std::filesystem::path &outputPath) const;
 
-	//====================================================================================
-	// Extract individual files to the specified path
+    //====================================================================================
+    // Extract individual files to the specified path
+    //------------------------------------------------------------------------------
+    // @param path
+    // @param name
+    // @param outputPath
+    //
+    //------------------------------------------------------------------------------
+    ExpectedVoid extractTo(const std::filesystem::path &path, const FileName &name,
+                           const std::filesystem::path &outputPath) const;
+
+    //====================================================================================
+    // Extract individual files to the specified path
     //------------------------------------------------------------------------------
     // @param fullPath
     // @param outputPath
-	//
-	//------------------------------------------------------------------------------
-    ExpectedVoid extractTo(
-		const std::filesystem::path& fullPath, 
-		const std::filesystem::path& outputPath
-	) const;
-
-	//====================================================================================
-	// Specifies whether a specified file exists in the path layer
+    //
     //------------------------------------------------------------------------------
-	// @param path
-	// @param name
-	//
-    //------------------------------------------------------------------------------
-    ExpectedVoid hasFile(
-		const std::filesystem::path& path, 
-		const FileName &name
-	) const;
+    ExpectedVoid extractTo(const std::filesystem::path &fullPath,
+                           const std::filesystem::path &outputPath) const;
 
-	//====================================================================================
-	// Specifies whether a file exists for the path
+    //====================================================================================
+    // Specifies whether a specified file exists in the path layer
+    //------------------------------------------------------------------------------
+    // @param path
+    // @param name
+    //
+    //------------------------------------------------------------------------------
+    ExpectedVoid hasFile(const std::filesystem::path &path, const FileName &name) const;
+
+    //====================================================================================
+    // Specifies whether a file exists for the path
     //------------------------------------------------------------------------------
     // @param fullPath
-	//
+    //
     //------------------------------------------------------------------------------
-    ExpectedVoid hasFile(
-		const std::filesystem::path& fullPath
-	) const;
+    ExpectedVoid hasFile(const std::filesystem::path &fullPath) const;
 
-	//====================================================================================
-	// Extracts the specified file for the specified path layer
+    //====================================================================================
+    // Extracts the specified file for the specified path layer
     //------------------------------------------------------------------------------
-	// @param path
-	// @param name
-	//
+    // @param path
+    // @param name
+    //
     //------------------------------------------------------------------------------
-    ExpectedData getFile(
-		const std::filesystem::path& path, 
-		const FileName &name
-	) const;
+    ExpectedData getFile(const std::filesystem::path &path, const FileName &name) const;
 
-	//====================================================================================
-	// Extract files from the specified path
+    //====================================================================================
+    // Extract files from the specified path
     //------------------------------------------------------------------------------
     // @param fullPath
-	//
+    //
     //------------------------------------------------------------------------------
-    ExpectedData getFile(
-		const std::filesystem::path& fullPath
-	) const;
+    ExpectedData getFile(const std::filesystem::path &fullPath) const;
 
 private:
     std::filesystem::path _packagePath = std::string();
-    FileName _packageName		= std::wstring();
-	std::string _password		= std::string();
-	size_t _size				= 0;
-	size_t _extractedSize		= 0;
-	bool _isEncrypted			= false;
-	bool _isValid				= false;
+    FileName _packageName = std::wstring();
+    std::string _password = std::string();
+    size_t _size = 0;
+    size_t _extractedSize = 0;
+    bool _isEncrypted = false;
+    bool _isValid = false;
 
-	Reader _archive;
+    Reader _archive;
 
-	mutable LastPreview _lastPreview = {};
+    mutable LastPreview _lastPreview = {};
 
-	bool load(const std::filesystem::path &path);
+    bool load(const std::filesystem::path &path);
     bool load(const std::vector<std::byte> &data);
 
-	static std::string composeMessage(ErrorCode errorCode, const std::string &message);
+    static std::string composeMessage(ErrorCode errorCode, const std::string &message);
 
-	static const bit7z::Bit7zLibrary lib;
+    static const bit7z::Bit7zLibrary lib;
     static const std::unordered_map<ErrorCode, std::string> errorText;
     static const std::unordered_map<ErrorCode, srt::Error::Type> errorCode;
 };
 
 class ArchiveRule {
 public:
-	ArchiveRule(Archive &archive);
+    ArchiveRule(Archive &archive);
     ArchiveRule(const std::filesystem::path &path);
 
-	ArchiveRule &hasFile(const std::filesystem::path &name);
+    ArchiveRule &hasFile(const std::filesystem::path &name);
     ArchiveRule &hasDir(const std::filesystem::path &name);
-    ArchiveRule &addRule(const std::filesystem::path &path, const Archive::ContentCheck&);
+    ArchiveRule &addRule(const std::filesystem::path &path, const Archive::ContentCheck &);
 
-	Archive::ExpectedVoid check() const;
+    Archive::ExpectedVoid check() const;
 
 private:
-	Archive *_archive = nullptr;
+    Archive *_archive = nullptr;
     std::filesystem::path _basePath;
     std::vector<std::filesystem::path> _fileChecks;
     std::vector<Archive::ContentRule> _contentRules;
 
-	bool checkArchive() const;
-	bool checkFileSystem() const;
-	bool checkRules() const;
+    bool checkArchive() const;
+    bool checkFileSystem() const;
+    bool checkRules() const;
 
-	std::vector<std::byte> getData(const std::filesystem::path &path, const std::wstring &name) const;
+    std::vector<std::byte> getData(const std::filesystem::path &path,
+                                   const std::wstring &name) const;
     std::vector<std::byte> getData(const std::filesystem::path &fullPath) const;
-    std::vector<std::byte> getArchiveData(const std::filesystem::path &path, const std::wstring &name) const;
-    std::vector<std::byte> getFileData(const std::filesystem::path &path, const std::wstring &name) const;
+    std::vector<std::byte> getArchiveData(const std::filesystem::path &path,
+                                          const std::wstring &name) const;
+    std::vector<std::byte> getFileData(const std::filesystem::path &path,
+                                       const std::wstring &name) const;
 };
 
 enum class Archive::ErrorCode {
@@ -221,7 +215,7 @@ class Archive::ExpectedData : public srt::Expected<std::vector<std::byte>> {
 public:
     ExpectedData() = default;
     ExpectedData(ErrorCode errorCode, const std::string &message = "");
-    ExpectedData(const std::vector<std::byte>& data);
+    ExpectedData(const std::vector<std::byte> &data);
 };
 
 class Archive::MemoryBuffer : public std::streambuf {
