@@ -5,13 +5,14 @@
 #include <stdcorelib/console.h>
 #include <stdcorelib/vla.h>
 #include <stdcorelib/path.h>
+#include <stdcorelib/str.h>
 
 #include <dsinfer/Support/PhonemeDict.h>
 
 int main(int /*argc*/, char * /*argv*/[]) {
     auto cmdline = stdc::system::command_line_arguments();
     if (cmdline.size() < 2) {
-        stdc::u8println("Usage: %1 <dict> [count]", stdc::system::application_name());
+        stdc::u8println("Usage: %1 <dict> [count] [keys...]", stdc::system::application_name());
         return 1;
     }
 
@@ -45,11 +46,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
     {
         int i = 0;
         for (const auto &pair : std::as_const(dicts[0])) {
-            stdc::u8print("%1: ", pair.first);
-            for (auto &item : pair.second) {
-                stdc::u8print("%1 ", item);
-            }
-            stdc::u8println();
+            stdc::u8println("%1: %2", pair.first, stdc::join(pair.second.vec(), " "));
             i++;
             if (i == 10) {
                 break;
@@ -64,14 +61,25 @@ int main(int /*argc*/, char * /*argv*/[]) {
         int i = 0;
         for (auto it = dicts[0].rbegin(); it != dicts[0].rend(); ++it) {
             auto &pair = *it;
-            stdc::u8print("%1: ", pair.first);
-            for (auto &item : pair.second) {
-                stdc::u8print("%1 ", item);
-            }
-            stdc::u8println();
+            stdc::u8println("%1: %2", pair.first, stdc::join(pair.second.vec(), " "));
             i++;
             if (i == 10) {
                 break;
+            }
+        }
+    }
+    stdc::u8println();
+
+    // Test find
+    stdc::u8println("Find specified entries:");
+    if (cmdline.size() >= 4) {
+        for (int i = 3; i < cmdline.size(); i++) {
+            const auto &key = cmdline[i];
+            auto it = dicts[0].find(key.c_str());
+            if (it == dicts[0].end()) {
+                stdc::u8println("%1: NOT FOUND", key);
+            } else {
+                stdc::u8println("%1: %2", key, stdc::join(it->second.vec(), " "));
             }
         }
     }
