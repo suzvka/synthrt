@@ -17,20 +17,25 @@ namespace ds {
     }
 
     struct const_char_hash {
-    public:
         size_t operator()(const char *key) const noexcept {
-            return std::hash<std::string_view>()(std::string_view(key, std::strlen(key)));
+            return spp::spp_hash<std::string_view>()(std::string_view(key, std::strlen(key)));
+        }
+    };
+
+    struct const_char_equal {
+        bool operator()(const char *key1, const char *key2) const noexcept {
+            return std::strcmp(key1, key2) == 0;
         }
     };
 
     class PhonemeDict::Impl {
     public:
         struct Entry {
-            int offset;
-            int count;
+            uint32_t offset;
+            uint32_t count;
         };
         std::vector<char> filebuf;
-        spp::sparse_hash_map<char *, Entry, const_char_hash> map;
+        spp::sparse_hash_map<char *, Entry, const_char_hash, const_char_equal> map;
     };
 
     PhonemeDict::PhonemeDict() : _impl(std::make_shared<Impl>()) {
@@ -39,6 +44,9 @@ namespace ds {
     PhonemeDict::~PhonemeDict() = default;
 
     bool PhonemeDict::load(const std::filesystem::path &path, std::error_code *ec) {
+        if (ec)
+            ec->clear();
+
         std::ifstream file(path, std::ios::in | std::ios::binary);
         if (!file.is_open()) {
             if (ec)
@@ -85,7 +93,7 @@ namespace ds {
                 }
 
                 char *value_start = nullptr;
-                int value_cnt = 0;
+                uint32_t value_cnt = 0;
 
                 // Find tab
                 auto p = start + 1;
@@ -98,6 +106,7 @@ namespace ds {
 
                         case '\r':
                         case '\n':
+                            start = p + 1;
                             goto out_next_line;
 
                         default:
@@ -107,6 +116,10 @@ namespace ds {
                 }
 
                 // Tab not found
+                while (start < buffer_end && (*start != '\r' && *start != '\n')) {
+                    *start = '\0';
+                    start++;
+                }
                 goto out_next_line;
 
             out_tab_find:
@@ -131,7 +144,7 @@ namespace ds {
                 }
 
             out_success: {
-                map[start] = Impl::Entry{int(value_start - buffer_begin), value_cnt};
+                map[start] = Impl::Entry{uint32_t(value_start - buffer_begin), value_cnt};
                 start = p + 1;
             }
             out_next_line:;
@@ -188,7 +201,9 @@ namespace ds {
         __stdc_impl_t;
         auto &filebuf = impl.filebuf;
         auto &map = impl.map;
-
+        if (!key) {
+            return end();
+        }
         auto it = map.find(const_cast<char *>(key));
         if (it == map.end()) {
             return end();
@@ -199,12 +214,18 @@ namespace ds {
     bool PhonemeDict::contains(const char *key) const {
         __stdc_impl_t;
         auto &map = impl.map;
+        if (!key) {
+            return false;
+        }
         return map.find(const_cast<char *>(key)) != map.end();
     }
 
     PhonemeList PhonemeDict::operator[](const char *key) const {
         __stdc_impl_t;
         auto &map = impl.map;
+        if (!key) {
+            return PhonemeList();
+        }
         auto it = map.find(const_cast<char *>(key));
         if (it == map.end()) {
             return PhonemeList();

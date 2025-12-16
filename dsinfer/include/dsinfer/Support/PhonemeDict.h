@@ -68,18 +68,20 @@ namespace ds {
             return iterator(_data, 0);
         }
         iterator end() const noexcept {
-            return iterator(nullptr, _count);
+            return iterator(nullptr, static_cast<int>(_count));
         }
-        std::vector<const char *> vec() {
-            return std::vector<const char *>(begin(), end());
+
+        template <class T = std::string_view>
+        std::vector<T> vec() const {
+            return std::vector<T>(begin(), end());
         }
 
     protected:
-        PhonemeList(const char *data, int count) : _data(data), _count(count) {
+        PhonemeList(const char *data, uint32_t count) : _data(data), _count(count) {
         }
 
         const char *_data;
-        int _count;
+        uint32_t _count;
 
         friend class PhonemeDict;
     };
@@ -200,6 +202,5 @@ namespace ds {
     };
 
 }
-
 
 #endif // DSINFER_PHONEMEDICT_H
